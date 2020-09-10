@@ -17,6 +17,7 @@ struct data_t {
     u32 uid;
     u32 gid;
     u8 type;
+    char comm[TASK_COMM_LEN];
 };
 BPF_PERF_OUTPUT(events);
 
@@ -31,7 +32,7 @@ int kprobe__load_script(struct pt_regs *ctx, struct linux_binprm *bprm) {
     return 0;
 }
 
-int kret__probe_script(struct pt_regs *ctx) {
+int kretprobe_load_script(struct pt_regs *ctx) {
     u32 pid = bpf_get_current_pid_tgid();
 
     load_script.delete(&pid);
@@ -53,6 +54,7 @@ int kprobe__bprm_change_interp(struct pt_regs *ctx, char *interp, struct linux_b
     data.uid = bprm->cred->uid.val;
     data.gid = bprm->cred->gid.val;
     data.type = 2;
+    bpf_get_current_comm(&data.comm, TASK_COMM_LEN);
 
     events.perf_submit(ctx, &data, sizeof(data));
 
@@ -68,7 +70,7 @@ int kprobe__load_elf_binary(struct pt_regs *ctx, struct linux_binprm *bprm) {
     content.uid = bprm->cred->uid.val;
     content.gid = bprm->cred->gid.val;
     content.type = 1;
-    // bpf_get_current_comm(&content.comm, TASK_COMM_LEN);
+    bpf_get_current_comm(&content.comm, TASK_COMM_LEN);
 
     events.perf_submit(ctx, &content, sizeof(content));  
                                     
@@ -78,7 +80,7 @@ int kprobe__load_elf_binary(struct pt_regs *ctx, struct linux_binprm *bprm) {
 """)
 
 # header
-print("%-18s %-6s %-6s %-6s %-7s %s" % ("TIME(s)", "PID", "UID", "GID", "TYPE", "CODE"))
+print("%-18s %-16s %-6s %-6s %-6s %-7s %s" % ("TIME(s)", "COMM", "PID", "UID", "GID", "TYPE", "CODE"))
 start = 0
 def print_event(cpu, data, size):
     global start
@@ -87,11 +89,11 @@ def print_event(cpu, data, size):
         start = event.ts
     time_s = (float(event.ts - start)) / 1000000000
     if event.type == 1:
-        print("%-18s %-6s %-6s %-6s %-7s" % (time_s, event.pid, event.uid, event.gid, "ELF"))
+        print("%-18s %-16s %-6s %-6s %-6s %-7s" % (time_s, event.comm, event.pid, event.uid, event.gid, "ELF"))
     elif event.type == 2:
-        print("%-18s %-6s %-6s %-6s %-7s %s" % (time_s, event.pid, event.uid, event.gid, "script", event.buf))
+        print("%-18s %-16s %-6s %-6s %-6s %-7s %s" % (time_s, event.comm, event.pid, event.uid, event.gid, "script", event.buf))
     else:
-        print("%-18s %-6s %-6s %-6s %-7s" % (time_s, event.pid, event.uid, event.gid, "Unknown"))
+        print("%-18s %-16s %-6s %-6s %-6s %-7s" % (time_s, event.comm, event.pid, event.uid, event.gid, "Unknown"))
 
 b["events"].open_perf_buffer(print_event)
 while True:
